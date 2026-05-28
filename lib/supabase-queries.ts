@@ -1,6 +1,3 @@
-console.log(process.env.NEXT_PUBLIC_SUPABASE_URL)
-
-
 import { createClient } from '@/lib/supabase/client'
 import type { Moto, OsEvent } from './types'
 
