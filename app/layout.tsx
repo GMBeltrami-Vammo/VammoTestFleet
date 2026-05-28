@@ -1,8 +1,7 @@
 import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
-import { createClient } from '@/lib/supabase/server'
-import { signOut } from '@/app/actions/auth'
+import { SessionProvider } from '@/components/providers/SessionProvider'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -31,31 +30,17 @@ export const metadata: Metadata = {
   },
 }
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
   return (
     <html lang="pt-BR" className="bg-background">
       <body className="font-sans antialiased">
-        {user && (
-          <header className="flex items-center justify-end gap-3 border-b border-border px-4 py-2 text-sm text-muted-foreground">
-            <span>{user.email}</span>
-            <form action={signOut}>
-              <button
-                type="submit"
-                className="rounded-md px-3 py-1 text-xs hover:bg-accent hover:text-accent-foreground transition-colors"
-              >
-                Sair
-              </button>
-            </form>
-          </header>
-        )}
-        {children}
+        <SessionProvider>
+          {children}
+        </SessionProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
