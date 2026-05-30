@@ -14,7 +14,7 @@ export interface OsEvent {
   os_date: string
   os_related: boolean
   os_description: string | null
-  AI_reason: string | null
+  ai_reason: string | null
 }
 
 export interface ProcessedMoto extends Moto {

@@ -522,7 +522,7 @@ export function DevFleet() {
                         </td>
                         <td className="py-2.5 pr-4 text-muted-foreground">{formatNumber(e.km_at_event)}</td>
                         <td className="py-2.5 pr-4 text-muted-foreground">{e.os_description ?? '—'}</td>
-                        <td className="py-2.5 text-muted-foreground">{e.AI_reason ?? '—'}</td>
+                        <td className="py-2.5 text-muted-foreground">{e.ai_reason ?? '—'}</td>
                       </tr>
                     ))}
                     {filteredOsEvents.length === 0 && (
