@@ -1,33 +1,20 @@
-import { createClient } from '@/lib/supabase/client'
 import type { Moto, OsEvent } from './types'
 
-export async function fetchMotos(): Promise<Moto[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .schema('fleet')
-    .from('test_part_bike')
-    .select('license_plate, dev_parts_on_bike, dev_item_codes, item_groups, km_at_install, km_current')
-
-  if (error) {
-    console.error('[v0] Error fetching motos:', error)
-    return []
-  }
-
-  return data || []
+export interface FleetData {
+  motos: Moto[]
+  osEvents: OsEvent[]
 }
 
-export async function fetchOsEvents(): Promise<OsEvent[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .schema('fleet')
-    .from('test_part_service_order')
-    .select('license_plate, os_id, km_at_event, os_date, os_related, os_description, ai_reason')
-    .eq('os_related', "TRUE")
-
-  if (error) {
-    console.error('[v0] Error fetching OS events:', error)
-    return []
+/**
+ * Fetches fleet data from our own authenticated API route ('/api/fleet') rather
+ * than querying Supabase directly from the browser. This keeps the Supabase
+ * credentials server-side and ensures the data is only reachable by an
+ * authenticated (NextAuth) session.
+ */
+export async function fetchFleet(): Promise<FleetData> {
+  const res = await fetch('/api/fleet')
+  if (!res.ok) {
+    throw new Error(`Failed to load fleet data (${res.status})`)
   }
-
-  return data || []
+  return res.json() as Promise<FleetData>
 }

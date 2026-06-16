@@ -82,6 +82,12 @@ export function PartCard({ part, motoMap, onOsClick }: PartCardProps) {
                 <div className="text-sm text-[#d4a017]">{part.error_motos.length}</div>
               </div>
             )}
+            {part.km_breakdown.reset > 0 && (
+              <div>
+                <div className="text-[10px] text-[#ff6b6b]">odômetro reiniciado</div>
+                <div className="text-sm text-[#ff6b6b]">{part.km_breakdown.reset}</div>
+              </div>
+            )}
           </div>
 
           {/* OS list */}

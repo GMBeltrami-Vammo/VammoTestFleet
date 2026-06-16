@@ -5,9 +5,14 @@ import useSWR from 'swr'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
-import { fetchMotos, fetchOsEvents } from '@/lib/supabase-queries'
-import { validateKm, formatNumber, buildPartData, COLOR_POOL } from '@/lib/data'
+import { fetchFleet } from '@/lib/supabase-queries'
+import { validateKm, classifyKm, formatNumber, buildPartData, COLOR_POOL } from '@/lib/data'
 import type { ProcessedMoto, OsEvent, SortOption, Moto } from '@/lib/types'
+
+// Module-level stable empty arrays so useMemo deps don't change on every render
+// while data is loading.
+const EMPTY_MOTOS: Moto[] = []
+const EMPTY_OS: OsEvent[] = []
 import { PartsChart } from './parts-chart'
 import { PartCard } from './part-card'
 import { MotoRow } from './moto-row'
@@ -100,11 +105,10 @@ export function DevFleet() {
   const [highlightedOsId, setHighlightedOsId] = useState<string | null>(null)
   const highlightedRowRef = useRef<HTMLTableRowElement>(null)
 
-  // Fetch data
-  const { data: allMotos = [], isLoading: loadingMotos } = useSWR('motos', fetchMotos, { refreshInterval: 60000 })
-  const { data: allOsEvents = [], isLoading: loadingOs } = useSWR('os-events', fetchOsEvents, { refreshInterval: 60000 })
-
-  const isLoading = loadingMotos || loadingOs
+  // Fetch all fleet data from the authenticated /api/fleet route in a single request.
+  const { data, isLoading, error, mutate } = useSWR('/api/fleet', fetchFleet, { refreshInterval: 60000 })
+  const allMotos = data?.motos ?? EMPTY_MOTOS
+  const allOsEvents = data?.osEvents ?? EMPTY_OS
 
   const partData = useMemo(() => buildPartData(allMotos, allOsEvents), [allMotos, allOsEvents])
 
@@ -182,11 +186,15 @@ export function DevFleet() {
   const processedMotos = useMemo(() => {
     const search = searchTerm.toUpperCase().trim()
     return allMotos
-      .map((m) => ({
-        ...m,
-        kmError: validateKm(m),
-        km_since_install: validateKm(m) ? -1 : (m.km_current ?? 0) - (m.km_at_install ?? 0),
-      }))
+      .map((m) => {
+        const kmStatus = classifyKm(m)
+        return {
+          ...m,
+          kmStatus,
+          kmError: kmStatus.label,
+          km_since_install: kmStatus.isError ? -1 : (m.km_current ?? 0) - (m.km_at_install ?? 0),
+        }
+      })
       .filter((m) => {
         if (search && !m.license_plate.includes(search) && !m.dev_parts_on_bike.toUpperCase().includes(search))
           return false
@@ -205,7 +213,8 @@ export function DevFleet() {
     const totalKm = partData.reduce((s, p) => s + p.total_km, 0)
     const totalOs = partData.reduce((s, p) => s + p.os_events.length, 0)
     const errCount = allMotos.filter((m) => validateKm(m)).length
-    return { totalKm, totalOs, errCount, partCount: partData.length, motoCount: allMotos.length }
+    const resetCount = partData.reduce((s, p) => s + p.km_breakdown.reset, 0)
+    return { totalKm, totalOs, errCount, resetCount, partCount: partData.length, motoCount: allMotos.length }
   }, [partData, allMotos])
 
   const motosStats = useMemo(() => {
@@ -254,7 +263,17 @@ export function DevFleet() {
     <div className="mx-auto max-w-[920px] px-5 py-7">
       <h1 className="mb-5 text-lg font-medium">Dev fleet</h1>
 
-      {isLoading ? (
+      {error && !data ? (
+        <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
+          <p className="text-sm text-destructive">Não foi possível carregar os dados da frota.</p>
+          <button
+            onClick={() => mutate()}
+            className="rounded-md border border-[#333333] bg-[#1e1e1e] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      ) : isLoading ? (
         <div className="flex h-64 items-center justify-center">
           <Spinner className="h-8 w-8" />
         </div>
@@ -310,6 +329,7 @@ export function DevFleet() {
                 <StatCard label="km acumulados" value={formatNumber(partsStats.totalKm)} />
                 <StatCard label="OS registradas" value={partsStats.totalOs} highlight={partsStats.totalOs > 0} />
                 {partsStats.errCount > 0 && <StatCard label="erros de km" value={partsStats.errCount} warning />}
+                {partsStats.resetCount > 0 && <StatCard label="odômetro reiniciado" value={partsStats.resetCount} highlight />}
               </div>
 
               {/* Filters */}

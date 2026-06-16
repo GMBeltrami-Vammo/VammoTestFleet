@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
 import type { ProcessedMoto, OsEvent } from '@/lib/types'
 import { formatNumber, formatDate } from '@/lib/data'
 import { KmBar } from './km-bar'
@@ -50,11 +50,21 @@ export function MotoRow({ moto, rank, osEvents, expanded, onToggle, color }: Mot
       </div>
 
       {/* KM bar or error */}
-      {moto.kmError ? (
-        <div className="mt-2 flex items-center gap-2 rounded-md bg-warning/10 px-2.5 py-1.5 text-[12px] text-warning">
-          <AlertTriangle size={14} />
-          <strong>Erro na aquisição de KM</strong>
-          <span className="opacity-75">— {moto.kmError}</span>
+      {moto.kmStatus.isError ? (
+        <div
+          className={`mt-2 flex flex-wrap items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] ${moto.kmStatus.category === 'reset'
+              ? 'bg-destructive/10 text-destructive'
+              : 'bg-warning/10 text-warning'
+            }`}
+        >
+          {moto.kmStatus.category === 'reset' ? <RotateCcw size={14} /> : <AlertTriangle size={14} />}
+          <strong>{moto.kmStatus.category === 'reset' ? 'Odômetro reiniciado' : 'Erro na aquisição de KM'}</strong>
+          <span className="opacity-75">— {moto.kmStatus.label}</span>
+          {moto.km_at_install != null && moto.km_current != null && (
+            <span className="ml-auto tabular-nums opacity-90">
+              {formatNumber(moto.km_at_install)} → {formatNumber(moto.km_current)} km
+            </span>
+          )}
         </div>
       ) : (
         <div className="mt-2 flex items-center gap-2">
@@ -94,7 +104,7 @@ export function MotoRow({ moto, rank, osEvents, expanded, onToggle, color }: Mot
               <div className="mb-1.5 text-[11px] tracking-wider text-muted-foreground">
                 ORDENS DE SERVIÇO
               </div>
-              {osEvents
+              {[...osEvents]
                 .sort((a, b) => (a.km_at_event ?? 0) - (b.km_at_event ?? 0))
                 .map((e) => (
                   <div
@@ -104,7 +114,7 @@ export function MotoRow({ moto, rank, osEvents, expanded, onToggle, color }: Mot
                     <span className="inline-block h-2 w-2 shrink-0 rounded-full bg-destructive" />
                     <span className="min-w-[56px] font-mono text-destructive">#{e.os_id}</span>
                     <span className="tabular-nums">{formatNumber(e.km_at_event)} km</span>
-                    {!moto.kmError && (
+                    {!moto.kmError && e.km_at_event != null && (
                       <span className="text-muted-foreground">
                         (+{formatNumber(e.km_at_event - moto.km_at_install!)} desde instalação)
                       </span>

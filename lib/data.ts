@@ -1,13 +1,37 @@
-import type { Moto, OsEvent, PartData } from './types'
+import type { Moto, OsEvent, PartData, KmStatus, KmBreakdown } from './types'
 
 export const COLOR_POOL = ['#EF9F27', '#1D9E75', '#378ADD', '#D4537E', '#7F77DD']
 
+/**
+ * Classifies the KM data quality of a moto. The categories map to the known
+ * upstream telemetry failure modes:
+ *  - missing: bike never reported odometer (no telemetry / unmatched join)
+ *  - negative: sentinel/garbage value
+ *  - reset: current < install — the odometer went backwards, which a real bike
+ *    cannot do. This is the fingerprint of an instrument-cluster (velocímetro)
+ *    swap: the replacement cluster starts near zero. Confirmed against the
+ *    reliability dataset (resets cluster at near-0 km, independent of the A/B arm).
+ *  - no_variation: current == install — recently installed or a frozen cluster.
+ */
+export function classifyKm(moto: Moto): KmStatus {
+  if (moto.km_current == null || moto.km_at_install == null) {
+    return { category: 'missing', label: 'KM ausente (sem telemetria)', isError: true }
+  }
+  if (moto.km_current < 0 || moto.km_at_install < 0) {
+    return { category: 'negative', label: 'KM negativo', isError: true }
+  }
+  if (moto.km_current < moto.km_at_install) {
+    return { category: 'reset', label: 'Odômetro reiniciado (possível troca de velocímetro)', isError: true }
+  }
+  if (moto.km_current === moto.km_at_install) {
+    return { category: 'no_variation', label: 'Sem variação de KM', isError: true }
+  }
+  return { category: 'ok', label: null, isError: false }
+}
+
+/** Back-compat wrapper: returns the error label, or null when KM is valid. */
 export function validateKm(moto: Moto): string | null {
-  if (moto.km_current == null || moto.km_at_install == null) return 'KM ausente'
-  if (moto.km_current < 0 || moto.km_at_install < 0) return 'KM negativo'
-  if (moto.km_current < moto.km_at_install) return 'KM atual < instalação'
-  if (moto.km_current === moto.km_at_install) return 'KM sem variação'
-  return null
+  return classifyKm(moto).label
 }
 
 export function formatNumber(n: number | null): string {
@@ -48,8 +72,20 @@ export function buildPartData(motos: Moto[], osEvents: OsEvent[]): PartData[] {
   return Object.values(groups)
     .map((g, i) => {
       const color = COLOR_POOL[i % COLOR_POOL.length]
-      const valid = g.motos.filter((m) => !validateKm(m))
-      const errs = g.motos.filter((m) => validateKm(m))
+      // Single pass: classify each moto once, splitting valid vs error and
+      // tallying why each error row was excluded (so KPIs stay interpretable).
+      const valid: Moto[] = []
+      const errs: Moto[] = []
+      const km_breakdown: KmBreakdown = { reset: 0, no_variation: 0, missing: 0, negative: 0 }
+      for (const m of g.motos) {
+        const status = classifyKm(m)
+        if (status.category === 'ok') {
+          valid.push(m)
+        } else {
+          errs.push(m)
+          km_breakdown[status.category] += 1
+        }
+      }
       const kmValues = valid.map((m) => (m.km_current ?? 0) - (m.km_at_install ?? 0))
       const total_km = kmValues.reduce((s, v) => s + v, 0)
       const min_km = kmValues.length ? Math.min(...kmValues) : 0
@@ -65,6 +101,7 @@ export function buildPartData(motos: Moto[], osEvents: OsEvent[]): PartData[] {
         min_km,
         max_km,
         os_rate,
+        km_breakdown,
       }
     })
     .sort((a, b) => b.total_km - a.total_km)

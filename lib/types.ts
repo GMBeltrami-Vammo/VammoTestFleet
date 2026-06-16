@@ -17,8 +17,28 @@ export interface OsEvent {
   ai_reason: string | null
 }
 
+// KM data-quality classification. A "reset" means the current odometer is below
+// the install reading — the signature of an instrument-cluster (velocímetro)
+// swap, since the replacement cluster starts near zero.
+export type KmCategory = 'ok' | 'missing' | 'negative' | 'reset' | 'no_variation'
+
+export interface KmStatus {
+  category: KmCategory
+  label: string | null // null when category is 'ok'
+  isError: boolean // true for any non-ok category
+}
+
+export interface KmBreakdown {
+  reset: number
+  no_variation: number
+  missing: number
+  negative: number
+}
+
 export interface ProcessedMoto extends Moto {
   km_since_install: number
+  kmStatus: KmStatus
+  /** Convenience mirror of kmStatus.label (null when valid). */
   kmError: string | null
 }
 
@@ -33,6 +53,11 @@ export interface PartData {
   error_motos: Moto[]
   total_km: number
   avg_km: number
+  min_km: number
+  max_km: number
+  os_rate: number
+  /** Count of error motos by reason, so KPIs can be presented honestly. */
+  km_breakdown: KmBreakdown
 }
 
 export type SortOption = 'km_since_install' | 'km_current' | 'km_at_install'
