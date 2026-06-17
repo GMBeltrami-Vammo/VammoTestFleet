@@ -6,16 +6,14 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { fetchFleet } from '@/lib/supabase-queries'
-import { validateKm, classifyKm, formatNumber, buildPartData, COLOR_POOL } from '@/lib/data'
+import { validateKm, classifyKm, formatNumber, formatDate, buildPartData, parseArrayField, displayParts, COLOR_POOL } from '@/lib/data'
 import type { ProcessedMoto, OsEvent, SortOption, Moto } from '@/lib/types'
-
-// Module-level stable empty arrays so useMemo deps don't change on every render
-// while data is loading.
-const EMPTY_MOTOS: Moto[] = []
-const EMPTY_OS: OsEvent[] = []
 import { PartsChart } from './parts-chart'
 import { PartCard } from './part-card'
 import { MotoRow } from './moto-row'
+
+const EMPTY_MOTOS: Moto[] = []
+const EMPTY_OS: OsEvent[] = []
 
 type TabType = 'parts' | 'motos' | 'os'
 type PartSortOption = 'total_km' | 'os_count' | 'avg_km' | 'error_count'
@@ -34,15 +32,18 @@ function StatCard({
 }) {
   return (
     <div
-      className="min-w-[90px] flex-1 rounded-lg px-3.5 py-2.5"
-      style={{ backgroundColor: warning ? '#2a1f00' : '#1e1e1e' }}
+      className="flex min-w-[90px] flex-1 flex-col justify-between rounded-xl px-3.5 py-2.5"
+      style={{
+        backgroundColor: warning ? '#1e1700' : '#161616',
+        border: `1px solid ${warning ? '#3a2d00' : '#222'}`,
+      }}
     >
-      <div className="mb-0.5 text-[11px]" style={{ color: warning ? '#d4a017' : '#b3b3b3' }}>
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider" style={{ color: warning ? '#6b5100' : '#444' }}>
         {label}
       </div>
       <div
-        className="text-xl font-medium"
-        style={{ color: warning ? '#d4a017' : highlight ? '#ff6b6b' : '#e0e0e0' }}
+        className="text-[22px] font-semibold tabular-nums leading-none"
+        style={{ color: warning ? '#d4a017' : highlight ? '#ff6b6b' : '#d0d0d0' }}
       >
         {value}
       </div>
@@ -62,17 +63,18 @@ function FilterToggle({
   children: React.ReactNode
 }) {
   const activeStyles = {
-    default: 'border-foreground/30 bg-foreground/10 text-foreground',
-    os: 'border-destructive/50 bg-destructive/10 text-destructive',
-    warning: 'border-warning/50 bg-warning/10 text-warning',
+    default: 'border-[#444] bg-[#222] text-[#e0e0e0]',
+    os: 'border-[#5a1a1a] bg-[#2a0d0d] text-[#ff6b6b]',
+    warning: 'border-[#4a3a00] bg-[#2a2000] text-[#d4a017]',
   }
   return (
     <button
       onClick={onClick}
-      className={`rounded-md border px-3 py-1.5 text-[12px] transition-colors ${active
+      className={`rounded-lg border px-3 py-1.5 text-[12px] transition-colors ${
+        active
           ? activeStyles[variant]
-          : 'border-[#333333] bg-[#1e1e1e] text-muted-foreground hover:text-foreground'
-        }`}
+          : 'border-[#2a2a2a] bg-[#161616] text-[#555] hover:text-[#999]'
+      }`}
     >
       {children}
     </button>
@@ -82,30 +84,25 @@ function FilterToggle({
 export function DevFleet() {
   const [activeTab, setActiveTab] = useState<TabType>('parts')
 
-  // Por peça filters
   const [partsGroupFilter, setPartsGroupFilter] = useState('all')
   const [partsSortBy, setPartsSortBy] = useState<PartSortOption>('total_km')
   const [partsOnlyWithOs, setPartsOnlyWithOs] = useState(false)
   const [partsOnlyWithErrors, setPartsOnlyWithErrors] = useState(false)
 
-  // Por moto filters
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedGroup, setSelectedGroup] = useState('all')
   const [sortBy, setSortBy] = useState<SortOption>('km_since_install')
   const [expandedMotos, setExpandedMotos] = useState<Set<string>>(new Set())
 
-  // OS tab filters
   const [osPartFilter, setOsPartFilter] = useState('all')
   const [osLicenseSearch, setOsLicenseSearch] = useState('')
   const [osDateFrom, setOsDateFrom] = useState('')
   const [osDateTo, setOsDateTo] = useState('')
   const [osSortBy, setOsSortBy] = useState<OsSortOption>('os_date')
 
-  // Cross-tab highlight
   const [highlightedOsId, setHighlightedOsId] = useState<string | null>(null)
   const highlightedRowRef = useRef<HTMLTableRowElement>(null)
 
-  // Fetch all fleet data from the authenticated /api/fleet route in a single request.
   const { data, isLoading, error, mutate } = useSWR('/api/fleet', fetchFleet, { refreshInterval: 60000 })
   const allMotos = data?.motos ?? EMPTY_MOTOS
   const allOsEvents = data?.osEvents ?? EMPTY_OS
@@ -133,25 +130,40 @@ export function DevFleet() {
     return map
   }, [allOsEvents])
 
-  const groups = useMemo(() => [...new Set(allMotos.map((m) => m.item_groups))], [allMotos])
+  // Individual group names (exploded from multi-part bikes)
+  const groups = useMemo(() => {
+    const s = new Set<string>()
+    allMotos.forEach((m) => parseArrayField(m.item_groups).forEach((g) => s.add(g)))
+    return [...s].sort()
+  }, [allMotos])
 
-  // License plates per part key (for OS filtering)
+  // Maps individual part code → set of license plates
   const platesByPartKey = useMemo(() => {
     const map: Record<string, Set<string>> = {}
     allMotos.forEach((m) => {
-      if (!map[m.dev_item_codes]) map[m.dev_item_codes] = new Set()
-      map[m.dev_item_codes].add(m.license_plate)
+      parseArrayField(m.dev_item_codes).forEach((code) => {
+        if (!map[code]) map[code] = new Set()
+        map[code].add(m.license_plate)
+      })
     })
     return map
   }, [allMotos])
 
-  // Filtered + sorted part data
+  // Resolve the display color for a moto: first matching individual part code wins
+  const getMotoColor = (m: Moto): string => {
+    const codes = parseArrayField(m.dev_item_codes)
+    for (const code of codes) {
+      if (colorMap[code]) return colorMap[code]
+    }
+    return COLOR_POOL[0]
+  }
+
   const filteredPartData = useMemo(() => {
-    let data = partData
-    if (partsGroupFilter !== 'all') data = data.filter((p) => p.item_groups === partsGroupFilter)
-    if (partsOnlyWithOs) data = data.filter((p) => p.os_events.length > 0)
-    if (partsOnlyWithErrors) data = data.filter((p) => p.error_motos.length > 0)
-    return [...data].sort((a, b) => {
+    let d = partData
+    if (partsGroupFilter !== 'all') d = d.filter((p) => p.item_groups === partsGroupFilter)
+    if (partsOnlyWithOs) d = d.filter((p) => p.os_events.length > 0)
+    if (partsOnlyWithErrors) d = d.filter((p) => p.error_motos.length > 0)
+    return [...d].sort((a, b) => {
       switch (partsSortBy) {
         case 'os_count': return b.os_events.length - a.os_events.length
         case 'avg_km': return b.avg_km - a.avg_km
@@ -161,7 +173,6 @@ export function DevFleet() {
     })
   }, [partData, partsGroupFilter, partsSortBy, partsOnlyWithOs, partsOnlyWithErrors])
 
-  // Filtered + sorted OS events
   const filteredOsEvents = useMemo(() => {
     let events = allOsEvents
     if (osPartFilter !== 'all') {
@@ -182,7 +193,6 @@ export function DevFleet() {
     })
   }, [allOsEvents, platesByPartKey, osPartFilter, osLicenseSearch, osDateFrom, osDateTo, osSortBy])
 
-  // Processed motos
   const processedMotos = useMemo(() => {
     const search = searchTerm.toUpperCase().trim()
     return allMotos
@@ -196,9 +206,10 @@ export function DevFleet() {
         }
       })
       .filter((m) => {
-        if (search && !m.license_plate.includes(search) && !m.dev_parts_on_bike.toUpperCase().includes(search))
+        if (search && !m.license_plate.includes(search) && !displayParts(m.dev_parts_on_bike).toUpperCase().includes(search))
           return false
-        if (selectedGroup !== 'all' && m.item_groups !== selectedGroup) return false
+        if (selectedGroup !== 'all' && !parseArrayField(m.item_groups).includes(selectedGroup))
+          return false
         return true
       })
       .sort((a, b) => {
@@ -208,7 +219,6 @@ export function DevFleet() {
       }) as ProcessedMoto[]
   }, [allMotos, searchTerm, selectedGroup, sortBy])
 
-  // Stats
   const partsStats = useMemo(() => {
     const totalKm = partData.reduce((s, p) => s + p.total_km, 0)
     const totalOs = partData.reduce((s, p) => s + p.os_events.length, 0)
@@ -224,14 +234,12 @@ export function DevFleet() {
     return { motoCount: processedMotos.length, errCount, withOs, totalKm }
   }, [processedMotos, osMap])
 
-  // Cross-tab: click OS in Por peça → navigate to OS tab with filter + highlight
   const handleOsClick = (osId: string, partKey: string) => {
     setOsPartFilter(partKey)
     setHighlightedOsId(osId)
     setActiveTab('os')
   }
 
-  // Scroll to highlighted row after tab switch
   useEffect(() => {
     if (activeTab === 'os' && highlightedOsId) {
       const timer = setTimeout(() => {
@@ -241,7 +249,6 @@ export function DevFleet() {
     }
   }, [activeTab, highlightedOsId])
 
-  // Clear highlight after 3 seconds
   useEffect(() => {
     if (!highlightedOsId) return
     const timer = setTimeout(() => setHighlightedOsId(null), 3000)
@@ -260,82 +267,86 @@ export function DevFleet() {
   const osHasActiveFilter = osPartFilter !== 'all' || osLicenseSearch || osDateFrom || osDateTo
 
   return (
-    <div className="mx-auto max-w-[920px] px-5 py-7">
-      <h1 className="mb-5 text-lg font-medium">Dev fleet</h1>
+    <div className="mx-auto max-w-[940px] px-5 py-8">
+      {/* Page header */}
+      <div className="mb-6 flex items-baseline justify-between">
+        <h1 className="text-[15px] font-semibold tracking-tight text-[#e0e0e0]">Dev fleet</h1>
+        <span className="text-[11px] text-[#444]">atualiza a cada 60 s</span>
+      </div>
 
       {error && !data ? (
         <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
-          <p className="text-sm text-destructive">Não foi possível carregar os dados da frota.</p>
+          <p className="text-sm text-[#ff6b6b]">Não foi possível carregar os dados da frota.</p>
           <button
             onClick={() => mutate()}
-            className="rounded-md border border-[#333333] bg-[#1e1e1e] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+            className="rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-1.5 text-[13px] text-[#666] transition-colors hover:text-[#ccc]"
           >
             Tentar novamente
           </button>
         </div>
       ) : isLoading ? (
         <div className="flex h-64 items-center justify-center">
-          <Spinner className="h-8 w-8" />
+          <Spinner className="h-7 w-7 text-[#555]" />
         </div>
       ) : (
         <>
           {/* Tabs */}
-          <div className="mb-5 flex gap-0.5 border-b border-[#333333]">
-            <button
-              className={`mb-[-0.5px] border-b-2 px-4 py-2 text-[13px] font-medium transition-colors ${activeTab === 'parts'
-                  ? 'border-foreground text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-muted-foreground/80'
+          <div className="mb-6 flex gap-0 border-b border-[#222]">
+            {(
+              [
+                {
+                  id: 'parts' as TabType,
+                  label: 'Por peça',
+                  badge: partsStats.errCount > 0 ? { value: partsStats.errCount, warning: true } : null,
+                },
+                { id: 'motos' as TabType, label: 'Por moto', badge: null },
+                {
+                  id: 'os' as TabType,
+                  label: 'OS relacionadas',
+                  badge: allOsEvents.length > 0 ? { value: allOsEvents.length, warning: false } : null,
+                },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                className={`mb-[-1px] border-b-2 px-4 py-2.5 text-[13px] font-medium transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-[#e0e0e0] text-[#e0e0e0]'
+                    : 'border-transparent text-[#555] hover:text-[#888]'
                 }`}
-              onClick={() => setActiveTab('parts')}
-            >
-              Por peça
-              {partsStats.errCount > 0 && (
-                <span className="ml-1.5 rounded-full bg-warning/20 px-1.5 py-0.5 text-[10px] text-warning">
-                  {partsStats.errCount}
-                </span>
-              )}
-            </button>
-            <button
-              className={`mb-[-0.5px] border-b-2 px-4 py-2 text-[13px] font-medium transition-colors ${activeTab === 'motos'
-                  ? 'border-foreground text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-muted-foreground/80'
-                }`}
-              onClick={() => setActiveTab('motos')}
-            >
-              Por moto
-            </button>
-            <button
-              className={`mb-[-0.5px] border-b-2 px-4 py-2 text-[13px] font-medium transition-colors ${activeTab === 'os'
-                  ? 'border-foreground text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-muted-foreground/80'
-                }`}
-              onClick={() => setActiveTab('os')}
-            >
-              OS relacionadas
-              {allOsEvents.length > 0 && (
-                <span className="ml-1.5 rounded-full bg-destructive/20 px-1.5 py-0.5 text-[10px] text-destructive">
-                  {allOsEvents.length}
-                </span>
-              )}
-            </button>
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+                {tab.badge && (
+                  <span
+                    className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                      tab.badge.warning
+                        ? 'bg-[#2a1f00] text-[#d4a017]'
+                        : 'bg-[#2a0d0d] text-[#ff6b6b]'
+                    }`}
+                  >
+                    {tab.badge.value}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
 
           {/* ── Por peça ── */}
           {activeTab === 'parts' && (
             <div>
-              <div className="mb-4 flex flex-wrap gap-2">
-                <StatCard label="peças distintas" value={partsStats.partCount} />
-                <StatCard label="motos monitoradas" value={partsStats.motoCount} />
+              <div className="mb-5 flex flex-wrap gap-2">
+                <StatCard label="peças" value={partsStats.partCount} />
+                <StatCard label="motos" value={partsStats.motoCount} />
                 <StatCard label="km acumulados" value={formatNumber(partsStats.totalKm)} />
                 <StatCard label="OS registradas" value={partsStats.totalOs} highlight={partsStats.totalOs > 0} />
                 {partsStats.errCount > 0 && <StatCard label="erros de km" value={partsStats.errCount} warning />}
-                {partsStats.resetCount > 0 && <StatCard label="odômetro reiniciado" value={partsStats.resetCount} highlight />}
+                {partsStats.resetCount > 0 && <StatCard label="odôm. reiniciado" value={partsStats.resetCount} highlight />}
               </div>
 
-              {/* Filters */}
-              <div className="mb-3 flex flex-wrap gap-2">
+              <div className="mb-4 flex flex-wrap gap-2">
                 <Select value={partsGroupFilter} onValueChange={setPartsGroupFilter}>
-                  <SelectTrigger className="min-w-[130px] flex-1 border-[#333333] bg-[#1e1e1e] text-[13px]">
+                  <SelectTrigger className="min-w-[130px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]">
                     <SelectValue placeholder="Todos os grupos" />
                   </SelectTrigger>
                   <SelectContent>
@@ -344,7 +355,7 @@ export function DevFleet() {
                   </SelectContent>
                 </Select>
                 <Select value={partsSortBy} onValueChange={(v) => setPartsSortBy(v as PartSortOption)}>
-                  <SelectTrigger className="min-w-[155px] border-[#333333] bg-[#1e1e1e] text-[13px]">
+                  <SelectTrigger className="min-w-[155px] border-[#2a2a2a] bg-[#161616] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -363,11 +374,11 @@ export function DevFleet() {
               </div>
 
               {/* Legend */}
-              <div className="mb-2.5 flex flex-wrap gap-2.5 text-xs text-muted-foreground">
+              <div className="mb-3 flex flex-wrap gap-3 text-[11px] text-[#555]">
                 {filteredPartData.map((p) => (
                   <span key={p.key} className="flex items-center gap-1.5">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p.color }} />
-                    {p.name.length > 40 ? p.name.slice(0, 40) + '…' : p.name}
+                    <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: p.color }} />
+                    {p.name.length > 44 ? p.name.slice(0, 44) + '…' : p.name}
                   </span>
                 ))}
               </div>
@@ -385,23 +396,23 @@ export function DevFleet() {
           {/* ── Por moto ── */}
           {activeTab === 'motos' && (
             <div>
-              <div className="mb-4 flex flex-wrap gap-2">
+              <div className="mb-5 flex flex-wrap gap-2">
                 <StatCard label="motos" value={motosStats.motoCount} />
                 {motosStats.errCount > 0 && <StatCard label="erros de km" value={motosStats.errCount} warning />}
                 <StatCard label="com OS" value={motosStats.withOs} highlight={motosStats.withOs > 0} />
                 <StatCard label="km total (válidas)" value={formatNumber(motosStats.totalKm)} />
               </div>
 
-              <div className="mb-3 flex flex-wrap gap-2">
+              <div className="mb-4 flex flex-wrap gap-2">
                 <Input
                   type="text"
                   placeholder="Buscar placa ou peça..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="min-w-[110px] flex-1 border-[#333333] bg-[#1e1e1e] text-[13px]"
+                  className="min-w-[110px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]"
                 />
                 <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-                  <SelectTrigger className="min-w-[120px] flex-1 border-[#333333] bg-[#1e1e1e] text-[13px]">
+                  <SelectTrigger className="min-w-[120px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]">
                     <SelectValue placeholder="Todos os grupos" />
                   </SelectTrigger>
                   <SelectContent>
@@ -410,7 +421,7 @@ export function DevFleet() {
                   </SelectContent>
                 </Select>
                 <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                  <SelectTrigger className="border-[#333333] bg-[#1e1e1e] text-[13px]">
+                  <SelectTrigger className="border-[#2a2a2a] bg-[#161616] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -430,7 +441,7 @@ export function DevFleet() {
                     osEvents={osMap[m.license_plate] || []}
                     expanded={expandedMotos.has(m.license_plate)}
                     onToggle={() => toggleMoto(m.license_plate)}
-                    color={colorMap[m.dev_item_codes] || COLOR_POOL[0]}
+                    color={getMotoColor(m)}
                   />
                 ))}
               </div>
@@ -440,7 +451,7 @@ export function DevFleet() {
           {/* ── OS relacionadas ── */}
           {activeTab === 'os' && (
             <div>
-              <div className="mb-4 flex flex-wrap gap-2">
+              <div className="mb-5 flex flex-wrap gap-2">
                 <StatCard label="OS encontradas" value={filteredOsEvents.length} highlight={filteredOsEvents.length > 0} />
                 {osPartFilter !== 'all' && (
                   <StatCard
@@ -450,30 +461,29 @@ export function DevFleet() {
                 )}
               </div>
 
-              {/* Filters */}
-              <div className="mb-3 flex flex-wrap gap-2">
+              <div className="mb-4 flex flex-wrap gap-2">
                 <Input
                   type="text"
                   placeholder="Buscar placa..."
                   value={osLicenseSearch}
                   onChange={(e) => setOsLicenseSearch(e.target.value)}
-                  className="min-w-[110px] flex-1 border-[#333333] bg-[#1e1e1e] text-[13px]"
+                  className="min-w-[110px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]"
                 />
                 <Select value={osPartFilter} onValueChange={setOsPartFilter}>
-                  <SelectTrigger className="min-w-[150px] flex-1 border-[#333333] bg-[#1e1e1e] text-[13px]">
+                  <SelectTrigger className="min-w-[150px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]">
                     <SelectValue placeholder="Todas as peças" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">Todas as peças</SelectItem>
                     {partData.map((p) => (
                       <SelectItem key={p.key} value={p.key}>
-                        {p.name.length > 40 ? p.name.slice(0, 40) + '…' : p.name}
+                        {p.name.length > 44 ? p.name.slice(0, 44) + '…' : p.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <Select value={osSortBy} onValueChange={(v) => setOsSortBy(v as OsSortOption)}>
-                  <SelectTrigger className="border-[#333333] bg-[#1e1e1e] text-[13px]">
+                  <SelectTrigger className="border-[#2a2a2a] bg-[#161616] text-[13px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -486,13 +496,13 @@ export function DevFleet() {
                   type="date"
                   value={osDateFrom}
                   onChange={(e) => setOsDateFrom(e.target.value)}
-                  className="w-[140px] border-[#333333] bg-[#1e1e1e] text-[13px]"
+                  className="w-[140px] border-[#2a2a2a] bg-[#161616] text-[13px]"
                 />
                 <Input
                   type="date"
                   value={osDateTo}
                   onChange={(e) => setOsDateTo(e.target.value)}
-                  className="w-[140px] border-[#333333] bg-[#1e1e1e] text-[13px]"
+                  className="w-[140px] border-[#2a2a2a] bg-[#161616] text-[13px]"
                 />
                 {osHasActiveFilter && (
                   <button
@@ -502,23 +512,22 @@ export function DevFleet() {
                       setOsDateFrom('')
                       setOsDateTo('')
                     }}
-                    className="rounded-md border border-[#333333] bg-[#1e1e1e] px-3 py-1.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                    className="rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-1.5 text-[12px] text-[#555] transition-colors hover:text-[#999]"
                   >
                     Limpar filtros
                   </button>
                 )}
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto rounded-xl border border-[#222]">
                 <table className="w-full text-[13px]">
                   <thead>
-                    <tr className="border-b border-[#333333] text-left text-[11px] text-muted-foreground">
-                      <th className="pb-2 pr-4 font-medium">Placa</th>
-                      <th className="pb-2 pr-4 font-medium">Peça</th>
-                      <th className="pb-2 pr-4 font-medium">Data</th>
-                      <th className="pb-2 pr-4 font-medium">KM</th>
-                      <th className="pb-2 pr-4 font-medium">Descrição</th>
-                      <th className="pb-2 font-medium">Razão IA</th>
+                    <tr className="border-b border-[#222] bg-[#111]">
+                      {['Placa', 'Peça', 'Data', 'KM', 'Descrição', 'Razão IA'].map((h) => (
+                        <th key={h} className="px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-[#444]">
+                          {h}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
@@ -526,28 +535,35 @@ export function DevFleet() {
                       <tr
                         key={e.os_id}
                         ref={e.os_id === highlightedOsId ? highlightedRowRef : null}
-                        className={`border-b border-[#333333] transition-colors duration-500 hover:bg-[#242424] ${e.os_id === highlightedOsId
-                            ? 'bg-[#1a2a1a] outline outline-1 outline-green-800/40'
+                        className={`border-b border-[#1a1a1a] transition-colors duration-500 hover:bg-[#1e1e1e] ${
+                          e.os_id === highlightedOsId
+                            ? 'bg-[#0d1f0d] outline outline-1 outline-green-800/30'
                             : i % 2 === 0
-                              ? 'bg-[#1a1a1a]'
-                              : 'bg-[#1e1e1e]'
-                          }`}
+                              ? 'bg-[#141414]'
+                              : 'bg-[#161616]'
+                        }`}
                       >
-                        <td className="py-2.5 pr-4 font-medium">{e.license_plate}</td>
-                        <td className="py-2.5 pr-4 text-muted-foreground">
-                          {motoMap[e.license_plate]?.dev_parts_on_bike ?? '—'}
+                        <td className="px-3 py-2.5 font-mono font-medium text-[#e0e0e0]">{e.license_plate}</td>
+                        <td className="px-3 py-2.5 text-[#666]">
+                          {displayParts(motoMap[e.license_plate]?.dev_parts_on_bike) !== '—'
+                            ? displayParts(motoMap[e.license_plate]?.dev_parts_on_bike)
+                            : '—'}
                         </td>
-                        <td className="py-2.5 pr-4 text-muted-foreground">
-                          {e.os_date ? e.os_date.slice(0, 10) : '—'}
+                        <td className="px-3 py-2.5 text-[#666]">
+                          {e.os_date ? formatDate(e.os_date) : '—'}
                         </td>
-                        <td className="py-2.5 pr-4 text-muted-foreground">{formatNumber(e.km_at_event)}</td>
-                        <td className="py-2.5 pr-4 text-muted-foreground">{e.os_description ?? '—'}</td>
-                        <td className="py-2.5 text-muted-foreground">{e.ai_reason ?? '—'}</td>
+                        <td className="px-3 py-2.5 tabular-nums text-[#888]">{formatNumber(e.km_at_event)}</td>
+                        <td className="max-w-[200px] px-3 py-2.5 text-[#666]">
+                          <span className="line-clamp-2">{e.os_description ?? '—'}</span>
+                        </td>
+                        <td className="max-w-[180px] px-3 py-2.5 text-[#666]">
+                          <span className="line-clamp-2">{e.ai_reason ?? '—'}</span>
+                        </td>
                       </tr>
                     ))}
                     {filteredOsEvents.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                        <td colSpan={6} className="py-10 text-center text-[13px] text-[#444]">
                           Nenhuma OS encontrada
                         </td>
                       </tr>

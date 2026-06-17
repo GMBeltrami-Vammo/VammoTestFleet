@@ -1,8 +1,8 @@
 export interface Moto {
   license_plate: string
-  dev_parts_on_bike: string
-  dev_item_codes: string
-  item_groups: string
+  dev_parts_on_bike: string | string[]
+  dev_item_codes: string | string[]
+  item_groups: string | string[]
   km_at_install: number | null
   km_current: number | null
 }

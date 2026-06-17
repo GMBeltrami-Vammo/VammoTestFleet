@@ -3,6 +3,33 @@ import type { Moto, OsEvent, PartData, KmStatus, KmBreakdown } from './types'
 export const COLOR_POOL = ['#EF9F27', '#1D9E75', '#378ADD', '#D4537E', '#7F77DD']
 
 /**
+ * Parses a Supabase/PostgreSQL/ClickHouse array field into a proper string[].
+ * Handles: JS string[], JSON arrays ["a","b"], pg arrays {a,b}, plain strings.
+ */
+export function parseArrayField(value: string | string[] | null | undefined): string[] {
+  if (value == null) return []
+  if (Array.isArray(value)) return value.filter(Boolean)
+  const s = value.trim()
+  if (!s) return []
+  if (s.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(s)
+      if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean)
+    } catch {}
+    return s.slice(1, -1).split(',').map((v) => v.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+  }
+  if (s.startsWith('{')) {
+    return s.slice(1, -1).split(',').map((v) => v.trim().replace(/^"|"$/g, '')).filter(Boolean)
+  }
+  return [s]
+}
+
+/** Formats a potentially-array part field for display, joining with " · ". */
+export function displayParts(value: string | string[] | null | undefined): string {
+  return parseArrayField(value).join(' · ') || '—'
+}
+
+/**
  * Classifies the KM data quality of a moto. The categories map to the known
  * upstream telemetry failure modes:
  *  - missing: bike never reported odometer (no telemetry / unmatched join)
@@ -46,34 +73,50 @@ export function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+/**
+ * Builds per-part analytics from raw fleet data.
+ *
+ * Bikes with multiple dev parts are "exploded" — each bike appears in every
+ * part group it belongs to. This means a bike carrying both a CAN protector
+ * and a side-stand sensor contributes its KM to both groups independently,
+ * rather than creating a spurious combined-parts group.
+ */
 export function buildPartData(motos: Moto[], osEvents: OsEvent[]): PartData[] {
   const groups: Record<string, { key: string; name: string; item_groups: string; motos: Moto[]; os_events: OsEvent[] }> = {}
+  // Maps license_plate → all individual part codes on that bike
+  const plateToPartKeys: Record<string, string[]> = {}
 
   motos.forEach((m) => {
-    const k = m.dev_item_codes
-    if (!groups[k]) {
-      groups[k] = { key: k, name: m.dev_parts_on_bike, item_groups: m.item_groups, motos: [], os_events: [] }
-    }
-    groups[k].motos.push(m)
+    const codes = parseArrayField(m.dev_item_codes)
+    const names = parseArrayField(m.dev_parts_on_bike)
+    const groupsList = parseArrayField(m.item_groups)
+
+    codes.forEach((code, i) => {
+      const partName = names[i] ?? names[0] ?? code
+      const partGroup = groupsList[i] ?? groupsList[0] ?? String(m.item_groups)
+
+      if (!groups[code]) {
+        groups[code] = { key: code, name: partName, item_groups: partGroup, motos: [], os_events: [] }
+      }
+      groups[code].motos.push(m)
+
+      if (!plateToPartKeys[m.license_plate]) plateToPartKeys[m.license_plate] = []
+      if (!plateToPartKeys[m.license_plate].includes(code)) {
+        plateToPartKeys[m.license_plate].push(code)
+      }
+    })
   })
 
-  const motoPartMap: Record<string, string> = {}
-  motos.forEach((m) => {
-    motoPartMap[m.license_plate] = m.dev_item_codes
-  })
-
+  // Attribute each OS event to all part groups on the same bike
   osEvents.forEach((e) => {
-    const partKey = motoPartMap[e.license_plate]
-    if (partKey && groups[partKey]) {
-      groups[partKey].os_events.push(e)
-    }
+    ;(plateToPartKeys[e.license_plate] ?? []).forEach((k) => {
+      if (groups[k]) groups[k].os_events.push(e)
+    })
   })
 
   return Object.values(groups)
     .map((g, i) => {
       const color = COLOR_POOL[i % COLOR_POOL.length]
-      // Single pass: classify each moto once, splitting valid vs error and
-      // tallying why each error row was excluded (so KPIs stay interpretable).
       const valid: Moto[] = []
       const errs: Moto[] = []
       const km_breakdown: KmBreakdown = { reset: 0, no_variation: 0, missing: 0, negative: 0 }
