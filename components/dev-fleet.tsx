@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import useSWR from 'swr'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -11,6 +11,7 @@ import type { ProcessedMoto, OsEvent, SortOption, Moto } from '@/lib/types'
 import { PartsChart } from './parts-chart'
 import { PartCard } from './part-card'
 import { MotoRow } from './moto-row'
+import { OsDetailGrid } from './os-detail'
 
 const EMPTY_MOTOS: Moto[] = []
 const EMPTY_OS: OsEvent[] = []
@@ -125,9 +126,6 @@ export function DevFleet() {
   const [osDateTo, setOsDateTo] = useState('')
   const [osSortBy, setOsSortBy] = useState<OsSortOption>('os_date')
   const [expandedOsIds, setExpandedOsIds] = useState<Set<string>>(new Set())
-
-  const [highlightedOsId, setHighlightedOsId] = useState<string | null>(null)
-  const highlightedRowRef = useRef<HTMLTableRowElement>(null)
 
   const { data, isLoading, error, mutate } = useSWR('/api/fleet', fetchFleet, { refreshInterval: 60000 })
   const allMotos = data?.motos ?? EMPTY_MOTOS
@@ -257,12 +255,6 @@ export function DevFleet() {
     return { motoCount: processedMotos.length, errCount, withOs, totalKm }
   }, [processedMotos, osMap])
 
-  const handleOsClick = (osId: string, partKey: string) => {
-    setOsPartFilter(partKey)
-    setHighlightedOsId(osId)
-    setActiveTab('os')
-  }
-
   const toggleOsRow = (osId: string) => {
     setExpandedOsIds((prev) => {
       const next = new Set(prev)
@@ -271,21 +263,6 @@ export function DevFleet() {
       return next
     })
   }
-
-  useEffect(() => {
-    if (activeTab === 'os' && highlightedOsId) {
-      const timer = setTimeout(() => {
-        highlightedRowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }, 80)
-      return () => clearTimeout(timer)
-    }
-  }, [activeTab, highlightedOsId])
-
-  useEffect(() => {
-    if (!highlightedOsId) return
-    const timer = setTimeout(() => setHighlightedOsId(null), 3000)
-    return () => clearTimeout(timer)
-  }, [highlightedOsId])
 
   const toggleMoto = (plate: string) => {
     setExpandedMotos((prev) => {
@@ -425,7 +402,7 @@ export function DevFleet() {
 
               <div className="mt-5">
                 {filteredPartData.map((p) => (
-                  <PartCard key={p.key} part={p} motoMap={motoMap} onOsClick={handleOsClick} />
+                  <PartCard key={p.key} part={p} motoMap={motoMap} />
                 ))}
               </div>
             </div>
@@ -583,24 +560,16 @@ export function DevFleet() {
                   <tbody>
                     {filteredOsEvents.map((e, i) => {
                       const isExpanded = expandedOsIds.has(e.os_id)
-                      const isHighlighted = e.os_id === highlightedOsId
-                      const rowBg = isHighlighted
-                        ? '#0d1f0d'
-                        : i % 2 === 0
-                          ? T.surface
-                          : T.bg
+                      const rowBg = i % 2 === 0 ? T.surface : T.bg
 
                       return (
-                        <>
+                        <Fragment key={e.os_id}>
                           <tr
-                            key={e.os_id}
-                            ref={isHighlighted ? highlightedRowRef : null}
                             onClick={() => toggleOsRow(e.os_id)}
                             className="cursor-pointer transition-colors duration-300"
                             style={{
                               borderBottom: `1px solid ${isExpanded ? T.lineStrong : T.line}`,
                               backgroundColor: isExpanded ? T.surface2 : rowBg,
-                              outline: isHighlighted ? '1px solid rgba(34,100,34,0.4)' : undefined,
                             }}
                             onMouseEnter={(ev) => {
                               if (!isExpanded) (ev.currentTarget as HTMLElement).style.backgroundColor = T.surface2
@@ -633,47 +602,13 @@ export function DevFleet() {
 
                           {/* Expanded detail row */}
                           {isExpanded && (
-                            <tr
-                              key={`${e.os_id}-detail`}
-                              style={{ borderBottom: `1px solid ${T.lineStrong}`, backgroundColor: T.surface2 }}
-                            >
+                            <tr style={{ borderBottom: `1px solid ${T.lineStrong}`, backgroundColor: T.surface2 }}>
                               <td colSpan={6} className="px-4 pb-4 pt-0">
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                  {/* Descrição */}
-                                  <div
-                                    className="rounded-lg p-3"
-                                    style={{ backgroundColor: T.bg, border: `1px solid ${T.line}` }}
-                                  >
-                                    <div
-                                      className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em]"
-                                      style={{ color: T.faint }}
-                                    >
-                                      Descrição completa
-                                    </div>
-                                    <p className="text-[13px] leading-relaxed" style={{ color: T.muted }}>
-                                      {e.os_description ?? <span style={{ color: T.faint }}>—</span>}
-                                    </p>
-                                  </div>
-                                  {/* Razão IA */}
-                                  <div
-                                    className="rounded-lg p-3"
-                                    style={{ backgroundColor: T.bg, border: `1px solid ${T.line}` }}
-                                  >
-                                    <div
-                                      className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em]"
-                                      style={{ color: T.faint }}
-                                    >
-                                      Razão IA
-                                    </div>
-                                    <p className="text-[13px] leading-relaxed" style={{ color: T.muted }}>
-                                      {e.ai_reason ?? <span style={{ color: T.faint }}>—</span>}
-                                    </p>
-                                  </div>
-                                </div>
+                                <OsDetailGrid event={e} />
                               </td>
                             </tr>
                           )}
-                        </>
+                        </Fragment>
                       )
                     })}
                     {filteredOsEvents.length === 0 && (

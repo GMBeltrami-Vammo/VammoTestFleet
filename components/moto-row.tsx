@@ -1,9 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import { AlertTriangle, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
 import type { ProcessedMoto, OsEvent } from '@/lib/types'
 import { formatNumber, formatDate, displayParts } from '@/lib/data'
 import { KmBar } from './km-bar'
+import { OsDetailGrid } from './os-detail'
 
 // Design tokens matching dev-fleet.tsx
 const T = {
@@ -34,6 +36,15 @@ interface MotoRowProps {
 
 export function MotoRow({ moto, rank, osEvents, expanded, onToggle, color }: MotoRowProps) {
   const kmSince = moto.kmError ? null : moto.km_current! - moto.km_at_install!
+  const [openOs, setOpenOs] = useState<Set<string>>(new Set())
+
+  const toggleOs = (id: string) =>
+    setOpenOs((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   return (
     <div
@@ -168,27 +179,44 @@ export function MotoRow({ moto, rank, osEvents, expanded, onToggle, color }: Mot
               </div>
               {[...osEvents]
                 .sort((a, b) => (a.km_at_event ?? 0) - (b.km_at_event ?? 0))
-                .map((e) => (
-                  <div
-                    key={e.os_id}
-                    className="flex items-center gap-3 rounded-lg px-2 py-1.5 text-[12px] transition-colors"
-                    onMouseEnter={(ev) => (ev.currentTarget.style.backgroundColor = T.lineStrong)}
-                    onMouseLeave={(ev) => (ev.currentTarget.style.backgroundColor = '')}
-                  >
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: T.dangerText }} />
-                    <span className="min-w-[60px] font-mono" style={{ color: T.dangerText }}>#{e.os_id}</span>
-                    <span className="tabular-nums" style={{ color: T.muted }}>{formatNumber(e.km_at_event)} km</span>
-                    {!moto.kmError && e.km_at_event != null && (
-                      <span style={{ color: T.faint }}>
-                        +{formatNumber(e.km_at_event - moto.km_at_install!)} desde instalação
-                      </span>
-                    )}
-                    {e.os_description && (
-                      <span className="ml-2 truncate" style={{ color: T.faint }}>{e.os_description}</span>
-                    )}
-                    <span className="ml-auto shrink-0" style={{ color: T.faint }}>{formatDate(e.os_date)}</span>
-                  </div>
-                ))}
+                .map((e) => {
+                  const isOpen = openOs.has(e.os_id)
+                  return (
+                    <div key={e.os_id}>
+                      <div
+                        onClick={(ev) => {
+                          ev.stopPropagation()
+                          toggleOs(e.os_id)
+                        }}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-[12px] transition-colors"
+                        style={{ backgroundColor: isOpen ? T.lineStrong : 'transparent' }}
+                        onMouseEnter={(ev) => (ev.currentTarget.style.backgroundColor = T.lineStrong)}
+                        onMouseLeave={(ev) => (ev.currentTarget.style.backgroundColor = isOpen ? T.lineStrong : 'transparent')}
+                      >
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: T.dangerText }} />
+                        <span className="min-w-[60px] font-mono" style={{ color: T.dangerText }}>#{e.os_id}</span>
+                        <span className="tabular-nums" style={{ color: T.muted }}>{formatNumber(e.km_at_event)} km</span>
+                        {!moto.kmError && e.km_at_event != null && (
+                          <span style={{ color: T.faint }}>
+                            +{formatNumber(e.km_at_event - moto.km_at_install!)} desde instalação
+                          </span>
+                        )}
+                        {e.os_description && (
+                          <span className="ml-2 truncate" style={{ color: T.faint }}>{e.os_description}</span>
+                        )}
+                        <span className="ml-auto shrink-0" style={{ color: T.faint }}>{formatDate(e.os_date)}</span>
+                        <span className="shrink-0" style={{ color: T.faint }}>
+                          {isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        </span>
+                      </div>
+                      {isOpen && (
+                        <div className="px-2 pb-2 pt-1.5">
+                          <OsDetailGrid event={e} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
             </>
           ) : (
             <p className="py-4 text-center text-[12px]" style={{ color: T.faint }}>Nenhuma OS registrada.</p>

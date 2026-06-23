@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { ChevronUp, ChevronDown } from 'lucide-react'
 import type { PartData, Moto } from '@/lib/types'
 import { formatNumber, formatDate, validateKm } from '@/lib/data'
+import { OsDetailGrid } from './os-detail'
 
 // Design tokens matching dev-fleet.tsx
 const T = {
@@ -26,11 +27,19 @@ const T = {
 interface PartCardProps {
   part: PartData
   motoMap: Record<string, Moto>
-  onOsClick: (osId: string, partKey: string) => void
 }
 
-export function PartCard({ part, motoMap, onOsClick }: PartCardProps) {
+export function PartCard({ part, motoMap }: PartCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [openOs, setOpenOs] = useState<Set<string>>(new Set())
+
+  const toggleOs = (id: string) =>
+    setOpenOs((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const sortedOsEvents = [...part.os_events].sort((a, b) => (a.km_at_event ?? 0) - (b.km_at_event ?? 0))
 
@@ -116,26 +125,37 @@ export function PartCard({ part, motoMap, onOsClick }: PartCardProps) {
                 const moto = motoMap[e.license_plate]
                 const err = moto ? validateKm(moto) : null
                 const kmSinceInstall = moto && !err ? (e.km_at_event ?? 0) - (moto.km_at_install ?? 0) : null
+                const isOpen = openOs.has(e.os_id)
 
                 return (
-                  <div
-                    key={e.os_id}
-                    onClick={() => onOsClick(e.os_id, part.key)}
-                    className="flex cursor-pointer flex-wrap items-center gap-2.5 rounded-lg px-2 py-1.5 text-[12px] transition-colors"
-                    onMouseEnter={(ev) => (ev.currentTarget.style.backgroundColor = T.surface2)}
-                    onMouseLeave={(ev) => (ev.currentTarget.style.backgroundColor = '')}
-                  >
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: T.dangerText }} />
-                    <span className="min-w-[54px] font-mono" style={{ color: T.dangerText }}>#{e.os_id}</span>
-                    <span className="min-w-[72px] font-mono text-[10px]" style={{ color: T.faint }}>{e.license_plate}</span>
-                    <span className="tabular-nums" style={{ color: T.muted }}>{formatNumber(e.km_at_event)} km</span>
-                    {kmSinceInstall != null && (
-                      <span style={{ color: T.faint }}>+{formatNumber(kmSinceInstall)} desde inst.</span>
+                  <div key={e.os_id}>
+                    <div
+                      onClick={() => toggleOs(e.os_id)}
+                      className="flex cursor-pointer flex-wrap items-center gap-2.5 rounded-lg px-2 py-1.5 text-[12px] transition-colors"
+                      style={{ backgroundColor: isOpen ? T.surface2 : 'transparent' }}
+                      onMouseEnter={(ev) => (ev.currentTarget.style.backgroundColor = T.surface2)}
+                      onMouseLeave={(ev) => (ev.currentTarget.style.backgroundColor = isOpen ? T.surface2 : 'transparent')}
+                    >
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: T.dangerText }} />
+                      <span className="min-w-[54px] font-mono" style={{ color: T.dangerText }}>#{e.os_id}</span>
+                      <span className="min-w-[72px] font-mono text-[10px]" style={{ color: T.faint }}>{e.license_plate}</span>
+                      <span className="tabular-nums" style={{ color: T.muted }}>{formatNumber(e.km_at_event)} km</span>
+                      {kmSinceInstall != null && (
+                        <span style={{ color: T.faint }}>+{formatNumber(kmSinceInstall)} desde inst.</span>
+                      )}
+                      {e.os_description && (
+                        <span className="truncate" style={{ color: T.faint }}>{e.os_description}</span>
+                      )}
+                      <span className="ml-auto shrink-0" style={{ color: T.faint }}>{formatDate(e.os_date)}</span>
+                      <span className="shrink-0" style={{ color: T.faint }}>
+                        {isOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      </span>
+                    </div>
+                    {isOpen && (
+                      <div className="px-2 pb-2 pt-1.5">
+                        <OsDetailGrid event={e} />
+                      </div>
                     )}
-                    {e.os_description && (
-                      <span className="truncate" style={{ color: T.faint }}>{e.os_description}</span>
-                    )}
-                    <span className="ml-auto shrink-0" style={{ color: T.faint }}>{formatDate(e.os_date)}</span>
                   </div>
                 )
               })}
