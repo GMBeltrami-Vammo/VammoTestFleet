@@ -19,6 +19,25 @@ type TabType = 'parts' | 'motos' | 'os'
 type PartSortOption = 'total_km' | 'os_count' | 'avg_km' | 'error_count'
 type OsSortOption = 'os_date' | 'km_at_event' | 'license_plate'
 
+// ─── Design tokens (adapted from goBuy Lumen dark palette) ───────────────────
+const T = {
+  bg:          '#222222',   // page background
+  surface:     '#2a2a2a',   // card / input surface
+  surface2:    '#323232',   // elevated surface (hover, alt rows)
+  line:        '#3d3d3d',   // borders
+  lineStrong:  '#4d4d4d',   // strong borders / separators
+  ink:         '#f0f0f0',   // primary text
+  muted:       '#b0b0b0',   // secondary text
+  faint:       '#727272',   // label / placeholder
+  warnBg:      '#231f00',
+  warnBorder:  '#4a3d00',
+  warnLabel:   '#8a6e00',
+  warnText:    '#d4a017',
+  dangerBg:    '#2a0d0d',
+  dangerBorder:'#5a1a1a',
+  dangerText:  '#ff6b6b',
+}
+
 function StatCard({
   label,
   value,
@@ -34,16 +53,20 @@ function StatCard({
     <div
       className="flex min-w-[90px] flex-1 flex-col justify-between rounded-xl px-3.5 py-2.5"
       style={{
-        backgroundColor: warning ? '#1e1700' : '#161616',
-        border: `1px solid ${warning ? '#3a2d00' : '#222'}`,
+        backgroundColor: warning ? T.warnBg : T.surface,
+        border: `1px solid ${warning ? T.warnBorder : T.line}`,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.3), 0 6px 20px -10px rgba(0,0,0,0.5)',
       }}
     >
-      <div className="mb-1 text-[10px] font-medium uppercase tracking-wider" style={{ color: warning ? '#6b5100' : '#444' }}>
+      <div
+        className="mb-1 text-[10px] font-semibold uppercase tracking-[0.15em]"
+        style={{ color: warning ? T.warnLabel : T.faint }}
+      >
         {label}
       </div>
       <div
         className="text-[22px] font-semibold tabular-nums leading-none"
-        style={{ color: warning ? '#d4a017' : highlight ? '#ff6b6b' : '#d0d0d0' }}
+        style={{ color: warning ? T.warnText : highlight ? T.dangerText : T.ink }}
       >
         {value}
       </div>
@@ -63,18 +86,20 @@ function FilterToggle({
   children: React.ReactNode
 }) {
   const activeStyles = {
-    default: 'border-[#444] bg-[#222] text-[#e0e0e0]',
-    os: 'border-[#5a1a1a] bg-[#2a0d0d] text-[#ff6b6b]',
-    warning: 'border-[#4a3a00] bg-[#2a2000] text-[#d4a017]',
+    default: { border: T.lineStrong, bg: T.surface2, color: T.ink },
+    os: { border: T.dangerBorder, bg: T.dangerBg, color: T.dangerText },
+    warning: { border: T.warnBorder, bg: T.warnBg, color: T.warnText },
   }
+  const s = activeStyles[variant]
   return (
     <button
       onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-[12px] transition-colors ${
+      className="rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors"
+      style={
         active
-          ? activeStyles[variant]
-          : 'border-[#2a2a2a] bg-[#161616] text-[#555] hover:text-[#999]'
-      }`}
+          ? { border: `1px solid ${s.border}`, backgroundColor: s.bg, color: s.color }
+          : { border: `1px solid ${T.line}`, backgroundColor: T.surface, color: T.faint }
+      }
     >
       {children}
     </button>
@@ -99,6 +124,7 @@ export function DevFleet() {
   const [osDateFrom, setOsDateFrom] = useState('')
   const [osDateTo, setOsDateTo] = useState('')
   const [osSortBy, setOsSortBy] = useState<OsSortOption>('os_date')
+  const [expandedOsIds, setExpandedOsIds] = useState<Set<string>>(new Set())
 
   const [highlightedOsId, setHighlightedOsId] = useState<string | null>(null)
   const highlightedRowRef = useRef<HTMLTableRowElement>(null)
@@ -130,14 +156,12 @@ export function DevFleet() {
     return map
   }, [allOsEvents])
 
-  // Individual group names (exploded from multi-part bikes)
   const groups = useMemo(() => {
     const s = new Set<string>()
     allMotos.forEach((m) => parseArrayField(m.item_groups).forEach((g) => s.add(g)))
     return [...s].sort()
   }, [allMotos])
 
-  // Maps individual part code → set of license plates
   const platesByPartKey = useMemo(() => {
     const map: Record<string, Set<string>> = {}
     allMotos.forEach((m) => {
@@ -149,7 +173,6 @@ export function DevFleet() {
     return map
   }, [allMotos])
 
-  // Resolve the display color for a moto: first matching individual part code wins
   const getMotoColor = (m: Moto): string => {
     const codes = parseArrayField(m.dev_item_codes)
     for (const code of codes) {
@@ -240,6 +263,15 @@ export function DevFleet() {
     setActiveTab('os')
   }
 
+  const toggleOsRow = (osId: string) => {
+    setExpandedOsIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(osId)) next.delete(osId)
+      else next.add(osId)
+      return next
+    })
+  }
+
   useEffect(() => {
     if (activeTab === 'os' && highlightedOsId) {
       const timer = setTimeout(() => {
@@ -266,32 +298,37 @@ export function DevFleet() {
 
   const osHasActiveFilter = osPartFilter !== 'all' || osLicenseSearch || osDateFrom || osDateTo
 
+  const selectStyle = {
+    className: 'border-[#3d3d3d] bg-[#2a2a2a] text-[13px]',
+  }
+
   return (
     <div className="mx-auto max-w-[940px] px-5 py-8">
       {/* Page header */}
       <div className="mb-6 flex items-baseline justify-between">
-        <h1 className="text-[15px] font-semibold tracking-tight text-[#e0e0e0]">Dev fleet</h1>
-        <span className="text-[11px] text-[#444]">atualiza a cada 60 s</span>
+        <h1 className="text-[15px] font-semibold tracking-tight" style={{ color: T.ink }}>Dev fleet</h1>
+        <span className="text-[11px]" style={{ color: T.faint }}>atualiza a cada 60 s</span>
       </div>
 
       {error && !data ? (
         <div className="flex h-64 flex-col items-center justify-center gap-3 text-center">
-          <p className="text-sm text-[#ff6b6b]">Não foi possível carregar os dados da frota.</p>
+          <p className="text-sm" style={{ color: T.dangerText }}>Não foi possível carregar os dados da frota.</p>
           <button
             onClick={() => mutate()}
-            className="rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-1.5 text-[13px] text-[#666] transition-colors hover:text-[#ccc]"
+            className="rounded-lg px-3 py-1.5 text-[13px] transition-colors"
+            style={{ border: `1px solid ${T.line}`, backgroundColor: T.surface, color: T.faint }}
           >
             Tentar novamente
           </button>
         </div>
       ) : isLoading ? (
         <div className="flex h-64 items-center justify-center">
-          <Spinner className="h-7 w-7 text-[#555]" />
+          <Spinner className="h-7 w-7" style={{ color: T.faint }} />
         </div>
       ) : (
         <>
           {/* Tabs */}
-          <div className="mb-6 flex gap-0 border-b border-[#222]">
+          <div className="mb-6 flex gap-0" style={{ borderBottom: `1px solid ${T.line}` }}>
             {(
               [
                 {
@@ -309,21 +346,22 @@ export function DevFleet() {
             ).map((tab) => (
               <button
                 key={tab.id}
-                className={`mb-[-1px] border-b-2 px-4 py-2.5 text-[13px] font-medium transition-colors ${
-                  activeTab === tab.id
-                    ? 'border-[#e0e0e0] text-[#e0e0e0]'
-                    : 'border-transparent text-[#555] hover:text-[#888]'
-                }`}
+                className="mb-[-1px] border-b-2 px-4 py-2.5 text-[13px] font-medium transition-colors"
+                style={{
+                  borderBottomColor: activeTab === tab.id ? T.ink : 'transparent',
+                  color: activeTab === tab.id ? T.ink : T.faint,
+                }}
                 onClick={() => setActiveTab(tab.id)}
               >
                 {tab.label}
                 {tab.badge && (
                   <span
-                    className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                    className="ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                    style={
                       tab.badge.warning
-                        ? 'bg-[#2a1f00] text-[#d4a017]'
-                        : 'bg-[#2a0d0d] text-[#ff6b6b]'
-                    }`}
+                        ? { backgroundColor: T.warnBg, color: T.warnText }
+                        : { backgroundColor: T.dangerBg, color: T.dangerText }
+                    }
                   >
                     {tab.badge.value}
                   </span>
@@ -346,7 +384,7 @@ export function DevFleet() {
 
               <div className="mb-4 flex flex-wrap gap-2">
                 <Select value={partsGroupFilter} onValueChange={setPartsGroupFilter}>
-                  <SelectTrigger className="min-w-[130px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]">
+                  <SelectTrigger className={`min-w-[130px] flex-1 ${selectStyle.className}`}>
                     <SelectValue placeholder="Todos os grupos" />
                   </SelectTrigger>
                   <SelectContent>
@@ -355,7 +393,7 @@ export function DevFleet() {
                   </SelectContent>
                 </Select>
                 <Select value={partsSortBy} onValueChange={(v) => setPartsSortBy(v as PartSortOption)}>
-                  <SelectTrigger className="min-w-[155px] border-[#2a2a2a] bg-[#161616] text-[13px]">
+                  <SelectTrigger className={`min-w-[155px] ${selectStyle.className}`}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -374,7 +412,7 @@ export function DevFleet() {
               </div>
 
               {/* Legend */}
-              <div className="mb-3 flex flex-wrap gap-3 text-[11px] text-[#555]">
+              <div className="mb-3 flex flex-wrap gap-3 text-[11px]" style={{ color: T.faint }}>
                 {filteredPartData.map((p) => (
                   <span key={p.key} className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: p.color }} />
@@ -409,10 +447,10 @@ export function DevFleet() {
                   placeholder="Buscar placa ou peça..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="min-w-[110px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]"
+                  className={`min-w-[110px] flex-1 ${selectStyle.className}`}
                 />
                 <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-                  <SelectTrigger className="min-w-[120px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]">
+                  <SelectTrigger className={`min-w-[120px] flex-1 ${selectStyle.className}`}>
                     <SelectValue placeholder="Todos os grupos" />
                   </SelectTrigger>
                   <SelectContent>
@@ -421,7 +459,7 @@ export function DevFleet() {
                   </SelectContent>
                 </Select>
                 <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                  <SelectTrigger className="border-[#2a2a2a] bg-[#161616] text-[13px]">
+                  <SelectTrigger className={selectStyle.className}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -467,10 +505,10 @@ export function DevFleet() {
                   placeholder="Buscar placa..."
                   value={osLicenseSearch}
                   onChange={(e) => setOsLicenseSearch(e.target.value)}
-                  className="min-w-[110px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]"
+                  className={`min-w-[110px] flex-1 ${selectStyle.className}`}
                 />
                 <Select value={osPartFilter} onValueChange={setOsPartFilter}>
-                  <SelectTrigger className="min-w-[150px] flex-1 border-[#2a2a2a] bg-[#161616] text-[13px]">
+                  <SelectTrigger className={`min-w-[150px] flex-1 ${selectStyle.className}`}>
                     <SelectValue placeholder="Todas as peças" />
                   </SelectTrigger>
                   <SelectContent>
@@ -483,7 +521,7 @@ export function DevFleet() {
                   </SelectContent>
                 </Select>
                 <Select value={osSortBy} onValueChange={(v) => setOsSortBy(v as OsSortOption)}>
-                  <SelectTrigger className="border-[#2a2a2a] bg-[#161616] text-[13px]">
+                  <SelectTrigger className={selectStyle.className}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -496,13 +534,13 @@ export function DevFleet() {
                   type="date"
                   value={osDateFrom}
                   onChange={(e) => setOsDateFrom(e.target.value)}
-                  className="w-[140px] border-[#2a2a2a] bg-[#161616] text-[13px]"
+                  className={`w-[140px] ${selectStyle.className}`}
                 />
                 <Input
                   type="date"
                   value={osDateTo}
                   onChange={(e) => setOsDateTo(e.target.value)}
-                  className="w-[140px] border-[#2a2a2a] bg-[#161616] text-[13px]"
+                  className={`w-[140px] ${selectStyle.className}`}
                 />
                 {osHasActiveFilter && (
                   <button
@@ -512,58 +550,135 @@ export function DevFleet() {
                       setOsDateFrom('')
                       setOsDateTo('')
                     }}
-                    className="rounded-lg border border-[#2a2a2a] bg-[#161616] px-3 py-1.5 text-[12px] text-[#555] transition-colors hover:text-[#999]"
+                    className="rounded-lg px-3 py-1.5 text-[12px] transition-colors"
+                    style={{ border: `1px solid ${T.line}`, backgroundColor: T.surface, color: T.faint }}
                   >
                     Limpar filtros
                   </button>
                 )}
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-[#222]">
+              {/* Hint text */}
+              {filteredOsEvents.length > 0 && (
+                <p className="mb-2 text-[11px]" style={{ color: T.faint }}>
+                  Clique em uma linha para ler a descrição e razão completas.
+                </p>
+              )}
+
+              <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${T.line}` }}>
                 <table className="w-full text-[13px]">
                   <thead>
-                    <tr className="border-b border-[#222] bg-[#111]">
+                    <tr style={{ borderBottom: `1px solid ${T.lineStrong}`, backgroundColor: T.bg }}>
                       {['Placa', 'Peça', 'Data', 'KM', 'Descrição', 'Razão IA'].map((h) => (
-                        <th key={h} className="px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider text-[#444]">
+                        <th
+                          key={h}
+                          className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[0.15em]"
+                          style={{ color: T.faint }}
+                        >
                           {h}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredOsEvents.map((e, i) => (
-                      <tr
-                        key={e.os_id}
-                        ref={e.os_id === highlightedOsId ? highlightedRowRef : null}
-                        className={`border-b border-[#1a1a1a] transition-colors duration-500 hover:bg-[#1e1e1e] ${
-                          e.os_id === highlightedOsId
-                            ? 'bg-[#0d1f0d] outline outline-1 outline-green-800/30'
-                            : i % 2 === 0
-                              ? 'bg-[#141414]'
-                              : 'bg-[#161616]'
-                        }`}
-                      >
-                        <td className="px-3 py-2.5 font-mono font-medium text-[#e0e0e0]">{e.license_plate}</td>
-                        <td className="px-3 py-2.5 text-[#666]">
-                          {displayParts(motoMap[e.license_plate]?.dev_parts_on_bike) !== '—'
-                            ? displayParts(motoMap[e.license_plate]?.dev_parts_on_bike)
-                            : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-[#666]">
-                          {e.os_date ? formatDate(e.os_date) : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 tabular-nums text-[#888]">{formatNumber(e.km_at_event)}</td>
-                        <td className="max-w-[200px] px-3 py-2.5 text-[#666]">
-                          <span className="line-clamp-2">{e.os_description ?? '—'}</span>
-                        </td>
-                        <td className="max-w-[180px] px-3 py-2.5 text-[#666]">
-                          <span className="line-clamp-2">{e.ai_reason ?? '—'}</span>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredOsEvents.map((e, i) => {
+                      const isExpanded = expandedOsIds.has(e.os_id)
+                      const isHighlighted = e.os_id === highlightedOsId
+                      const rowBg = isHighlighted
+                        ? '#0d1f0d'
+                        : i % 2 === 0
+                          ? T.surface
+                          : T.bg
+
+                      return (
+                        <>
+                          <tr
+                            key={e.os_id}
+                            ref={isHighlighted ? highlightedRowRef : null}
+                            onClick={() => toggleOsRow(e.os_id)}
+                            className="cursor-pointer transition-colors duration-300"
+                            style={{
+                              borderBottom: `1px solid ${isExpanded ? T.lineStrong : T.line}`,
+                              backgroundColor: isExpanded ? T.surface2 : rowBg,
+                              outline: isHighlighted ? '1px solid rgba(34,100,34,0.4)' : undefined,
+                            }}
+                            onMouseEnter={(ev) => {
+                              if (!isExpanded) (ev.currentTarget as HTMLElement).style.backgroundColor = T.surface2
+                            }}
+                            onMouseLeave={(ev) => {
+                              if (!isExpanded) (ev.currentTarget as HTMLElement).style.backgroundColor = rowBg
+                            }}
+                          >
+                            <td className="px-3 py-2.5 font-mono font-semibold" style={{ color: T.ink }}>
+                              {e.license_plate}
+                            </td>
+                            <td className="px-3 py-2.5" style={{ color: T.muted }}>
+                              {displayParts(motoMap[e.license_plate]?.dev_parts_on_bike) !== '—'
+                                ? displayParts(motoMap[e.license_plate]?.dev_parts_on_bike)
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2.5" style={{ color: T.muted }}>
+                              {e.os_date ? formatDate(e.os_date) : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 tabular-nums" style={{ color: T.muted }}>
+                              {formatNumber(e.km_at_event)}
+                            </td>
+                            <td className="max-w-[200px] px-3 py-2.5" style={{ color: T.faint }}>
+                              <span className="line-clamp-2">{e.os_description ?? '—'}</span>
+                            </td>
+                            <td className="max-w-[180px] px-3 py-2.5" style={{ color: T.faint }}>
+                              <span className="line-clamp-2">{e.ai_reason ?? '—'}</span>
+                            </td>
+                          </tr>
+
+                          {/* Expanded detail row */}
+                          {isExpanded && (
+                            <tr
+                              key={`${e.os_id}-detail`}
+                              style={{ borderBottom: `1px solid ${T.lineStrong}`, backgroundColor: T.surface2 }}
+                            >
+                              <td colSpan={6} className="px-4 pb-4 pt-0">
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                  {/* Descrição */}
+                                  <div
+                                    className="rounded-lg p-3"
+                                    style={{ backgroundColor: T.bg, border: `1px solid ${T.line}` }}
+                                  >
+                                    <div
+                                      className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em]"
+                                      style={{ color: T.faint }}
+                                    >
+                                      Descrição completa
+                                    </div>
+                                    <p className="text-[13px] leading-relaxed" style={{ color: T.muted }}>
+                                      {e.os_description ?? <span style={{ color: T.faint }}>—</span>}
+                                    </p>
+                                  </div>
+                                  {/* Razão IA */}
+                                  <div
+                                    className="rounded-lg p-3"
+                                    style={{ backgroundColor: T.bg, border: `1px solid ${T.line}` }}
+                                  >
+                                    <div
+                                      className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em]"
+                                      style={{ color: T.faint }}
+                                    >
+                                      Razão IA
+                                    </div>
+                                    <p className="text-[13px] leading-relaxed" style={{ color: T.muted }}>
+                                      {e.ai_reason ?? <span style={{ color: T.faint }}>—</span>}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      )
+                    })}
                     {filteredOsEvents.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-10 text-center text-[13px] text-[#444]">
+                        <td colSpan={6} className="py-10 text-center text-[13px]" style={{ color: T.faint }}>
                           Nenhuma OS encontrada
                         </td>
                       </tr>
